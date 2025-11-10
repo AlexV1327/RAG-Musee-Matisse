@@ -1,0 +1,9 @@
+httpx
+certifi
+watchdog
+transformers>=4.45,<5
+tokenizers>=0.22,<0.24
+sentence-transformers
+faiss-cpu
+streamlit
+numpy
