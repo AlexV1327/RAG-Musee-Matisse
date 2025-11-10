@@ -1,101 +1,60 @@
-
 from pathlib import Path
-import json, math 
+import json
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-
-from preview import iter_jsonl
-
 from config import CHUNKS_FILE, EMB_MODEL_NAME, BATCH_SIZE, INDEX_FILE, META_FILE
 
+def iter_jsonl(path: Path):
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except Exception:
+                continue
+
+def batched(it, size):
+    buf = []
+    for x in it:
+        buf.append(x)
+        if len(buf) >= size:
+            yield buf
+            buf = []
+    if buf:
+        yield buf
+
 def main():
-    """
-    
-    """
-    if not CHUNKS_FILE.exists():
-        print(f"[err] Introuvable : {CHUNKS_FILE}")
-        return
-    
-    # 1) Charger les chunks et préparer les textes + métadonnées
+    assert CHUNKS_FILE.exists(), f"Manquant: {CHUNKS_FILE} (lance text_chunker.py)"
 
-    texts = []
-    metas = [] # on garde l'ordre strictement aligné avec 'texts'
-
-    for rec in iter_jsonl(CHUNKS_FILE):
-        t = (rec.get("text") or "").strip()
-        if not t :
-            continue
-
-        # E5 : préfixe passage 
-
-        texts.append(f"passage: {t}")
-        metas.append({
-            "chunk_id": rec.get("chunk_id"),
-            "doc_id": rec.get("doc_id"),
-            "url": rec.get("url"),
-            "title": (rec.get('title') or "").strip(),
-        })
-
-
-    if not texts:
-        print("[err] Aucun chunk à encoder")
-        return
-    
-    print(f"[info] Chunks à encoder : {len(texts)}")
-
-    # 2) Charger le modèle d'emmbeddings 
+    print(f"[load model] {EMB_MODEL_NAME}")
     model = SentenceTransformer(EMB_MODEL_NAME)
 
-    # 3) Encoder en batch + normalisation (cosine (similarité))
+    metas, vecs = [], []
+    for batch in batched(iter_jsonl(CHUNKS_FILE), BATCH_SIZE):
+        texts = [b["text"] for b in batch]
+        # E5 attend les préfixes
+        texts = [f"passage: {t}" if "e5" in EMB_MODEL_NAME.lower() else t for t in texts]
+        emb = model.encode(texts, batch_size=BATCH_SIZE, show_progress_bar=True, normalize_embeddings=True)
+        vecs.append(emb.astype("float32"))
+        metas.extend(batch)
 
-    embs = []
-    num_batches = math.ceil(len(texts)/ BATCH_SIZE)
+    X = np.vstack(vecs)
+    print("[faiss] build index (IP, normalisé)")
+    index = faiss.IndexFlatIP(X.shape[1])
+    index.add(X)
 
-
-    for b in range(num_batches):
-        batch = texts[b*BATCH_SIZE: (b+1)*BATCH_SIZE]
-        vecs = model.encode(
-            batch,
-            batch_size=BATCH_SIZE,
-            convert_to_numpy=True,
-            normalize_embeddings=True, # Crucial pour cosine
-            show_progress_bar=True
-        )
-        embs.append(vecs.astype("float32"))
-    embs = np.vstack(embs) # (N = nombre total de chunks, D = dimension des embeddings)
-    N, D = embs.shape
-    print(f"[info] Embeddings shape: {embs.shape}")
-
-    # 4) Index FAISS (cosine -> IndexFlatIP car vecteurs normalisés)
-
-    index = faiss.IndexFlatIP(D)
-    index.add(embs)
+    print(f"[save] index -> {INDEX_FILE}")
     faiss.write_index(index, str(INDEX_FILE))
-    print(f"[ok] Index écrit -> {INDEX_FILE}")
 
-    # 5) Sauvegarder les métadonnées alignées (JSONL)
+    print(f"[save] meta  -> {META_FILE}")
+    with META_FILE.open("w", encoding="utf-8") as f:
+        for m in metas:
+            f.write(json.dumps(m, ensure_ascii=False) + "\n")
 
-    with META_FILE.open("w", encoding="utf-8") as out:
-        for m in metas :
-            out.write(json.dumps(m, ensure_ascii=False) + "\n")
-    print(f"[ok] Métadonnées écrites -> {META_FILE}")
-
-    print(f"[done] {N} vecteurs indexés.")
+    print(f"[done] {len(metas)} chunks indexés.")
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-

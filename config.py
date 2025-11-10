@@ -1,8 +1,8 @@
 import os, hashlib
 from pathlib import Path
 
+# CRAWL / DONNÉES
 BASE_URL = "https://www.musee-matisse-nice.org"
-START_PATHS = ["/fr/"]  # cible la version française (slash final)
 DATA_DIR = Path("./matisse_data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -11,38 +11,37 @@ PAGES_FILE  = DATA_DIR / "pages.jsonl"
 CHUNKS_FILE = DATA_DIR / "chunks.jsonl"
 
 # Crawl
-USER_AGENT = "RAG-educatif/1.0"
+USER_AGENT = "RAG-educatif/1.0 (+https://example.local)"
 REQUEST_TIMEOUT = 20
 THROTTLE_SECONDS = 0.8
-MAX_PAGES = 5  # POC
 
-# Embeddings (une seule fois)
-EMB_MODEL_NAME = "intfloat/multilingual-e5-small"
-BATCH_SIZE = 64
-
-# LLM
-API_BASE  = os.getenv("API_BASE", "https://api.mistral.ai")
-API_KEY   = os.getenv("API_KEY") or os.getenv("MISTRAL_API_KEY")
-API_MODEL = os.getenv("MODEL", "mistral-small-latest")
-OLLAMA_MODEL = "mistral:7b-instruct"
-
-def sha16(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8","ignore")).hexdigest()[:16]
-
+# URLs ciblées (liste blanche) – sécurise le crawl
 TARGET_URLS = [
-    "https://www.musee-matisse-nice.org/fr/collection/historique-de-la-collection",
-    "https://www.musee-matisse-nice.org/fr/informations-pratiques",
+    "https://www.musee-matisse-nice.org/fr/",
+    "https://www.musee-matisse-nice.org/fr/collections",
     "https://www.musee-matisse-nice.org/fr/collection/bibliotheque-de-matisse",
     "https://www.musee-matisse-nice.org/fr/musee/histoire-du-musee",
     "https://www.musee-matisse-nice.org/fr/exposition/matisse-mediterranees",
 ]
 
-# Index vectoriel
+# INDEX VECTORIEL
 INDEX_FILE = DATA_DIR / "faiss.index"
 META_FILE  = DATA_DIR / "chunk_meta.jsonl"
 
-# Recherche
+# RECHERCHE / CHUNKING
 TOP_K = 5
+TARGET_CHARS   = 900   # taille visée d’un chunk
+MIN_CHARS      = 350   # taille minimale avant de couper
+OVERLAP_CHARS  = 120   # chevauchement entre chunks
+MAX_CONTEXT_CHARS = 8_000  # limite de contexte envoyé au LLM
 
-# RAG (taille contexte LLM)
-MAX_CONTEXT_CHARS = 2200
+# EMBEDDINGS
+EMB_MODEL_NAME = "intfloat/multilingual-e5-small"
+BATCH_SIZE = 64
+
+# LLM (Mistral)
+API_MODEL = os.getenv("API_MODEL", "mistral-large-latest")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
+
+# HELPERS
+sha16 = lambda s: hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]

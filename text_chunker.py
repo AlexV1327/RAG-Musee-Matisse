@@ -1,130 +1,81 @@
-from pathlib import Path 
-import json
-import re
-from typing import Iterable, Dict, List
-
+from pathlib import Path
+import json, re
+from typing import List
 from config import PAGES_FILE, CHUNKS_FILE, TARGET_CHARS, MIN_CHARS, OVERLAP_CHARS
-from preview import iter_jsonl
 
+SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?:;])\s+")
 
+def iter_jsonl(path: Path):
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
-# Regex qui trouve la fin des phrases
-SENT_SPLIT_RE = re.compile(r'(?<=[\.\!\?\:\;])\s+')  # coupe après la ponctuation forte
-
-# Découpe en phrases 
 def split_into_sentences(text: str) -> List[str]:
-    """
-    Découpe un gros en liste de phrases 
-    """
-    parts = SENT_SPLIT_RE.split(text.strip())
-    return [p.strip() for p in parts if p and len(p.strip()) > 0]
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    if not text:
+        return []
+    parts = SENT_SPLIT_RE.split(text)
+    return [p.strip() for p in parts if p.strip()]
 
-# Fonction qui fabrique les chunks
-
-def build_chunks(text: str,
-                 target_chars: int = TARGET_CHARS,
-                 min_chars: int = MIN_CHARS,
-                 overlap_chars: int = OVERLAP_CHARS) -> List[str]:
-    """
-    Construit des chunks ~target_chars à partir de phrases,
-    avec un chevauchement de overlap_chars entre chunks consécutifs.
-    """
-    sents = split_into_sentences(text)
-    chunks = []
-    buf = ""
-
+def chunk_sentences(sents: List[str]) -> List[str]:
+    chunks, cur = [], []
+    cur_len = 0
     for s in sents:
-        if not buf:
-            buf = s
+        if not s:
             continue
-        # si ajouter la phrase dépasse la cible, on "flush" le buffer
-        if len(buf) + 1 + len(s) >= target_chars:
-            # si trop court, on force l’ajout de la phrase pour éviter un micro-chunk
-            if len(buf) < min_chars:
-                buf = buf + " " + s
-            chunks.append(buf.strip())
-            # chevauchement : on reprend la "fin" du buffer précédent
-            if overlap_chars > 0:
-                tail = buf[-overlap_chars:]
-                # évite de couper un mot au milieu
-                tail = tail[tail.find(" ")+1:] if " " in tail else tail
-            else:
-                tail = ""
-            buf = (tail + " " + s).strip()
+        if cur_len + len(s) + 1 <= TARGET_CHARS:
+            cur.append(s); cur_len += len(s) + 1
         else:
-            buf = buf + " " + s
-
-    if buf and len(buf.strip()) >= min_chars:
-        chunks.append(buf.strip())
-
-    # cas extrême : tout est trop court → garder 1 chunk quand même
-    if not chunks and text.strip():
-        chunks = [text.strip()]
+            if cur_len >= MIN_CHARS:
+                chunks.append(" ".join(cur))
+                # overlap simple: on repart avec la dernière phrase
+                cur = [s]; cur_len = len(s)
+            else:
+                # phrase très longue: coupe forcée
+                buf = (" ".join(cur) + " " + s).strip()
+                chunks.append(buf[:TARGET_CHARS])
+                rest = buf[TARGET_CHARS:]
+                cur = [rest]; cur_len = len(rest)
+    if cur and cur_len >= MIN_CHARS:
+        chunks.append(" ".join(cur))
+    # post-overlap
+    if OVERLAP_CHARS > 0 and len(chunks) >= 2:
+        padded = []
+        for i, ch in enumerate(chunks):
+            if i == 0:
+                padded.append(ch)
+            else:
+                prev = chunks[i-1]
+                overlap = prev[-OVERLAP_CHARS:]
+                padded.append((overlap + " " + ch).strip())
+        chunks = padded
     return chunks
 
-def estimate_tokens(s: str) -> int:
-    # Estimation grossière: ~4 caractères par token (FR/EN)
-    return max(1, int(len(s) / 4))
-
-
-# Lire les pages et produire les chunks
-
 def main():
-    if not PAGES_FILE.exists():
-        print(f"[err] Fichier introuvable : {PAGES_FILE}")
-        return
-
     CHUNKS_FILE.parent.mkdir(parents=True, exist_ok=True)
     out = CHUNKS_FILE.open("w", encoding="utf-8")
-
-    total_docs = 0
-    total_chunks = 0
-
+    saved = 0
     for rec in iter_jsonl(PAGES_FILE):
-        total_docs += 1
-        doc_id = rec.get("id") or ""
-        url = rec.get("url") or ""
-        title = (rec.get("title") or "").strip()
-        text = (rec.get("text") or "").strip()
-        if not text:
-            continue
-
-        chunks = build_chunks(text)
-        for j, ch in enumerate(chunks):
-            item = {
-                "doc_id": doc_id,
-                "chunk_id": f"{doc_id}-{j:03d}",
+        url = rec.get("url")
+        title = (rec.get("title") or "").strip() or "[Sans titre]"
+        text = rec.get("text") or ""
+        sents = split_into_sentences(text)
+        for i, chunk in enumerate(chunk_sentences(sents)):
+            out.write(json.dumps({
                 "url": url,
                 "title": title,
-                "text": ch,
-                "n_chars": len(ch),
-                "n_tokens_est": estimate_tokens(ch),
-            }
-            out.write(json.dumps(item, ensure_ascii=False) + "\n")
-            total_chunks += 1
-
+                "chunk_id": i,
+                "text": chunk,
+            }, ensure_ascii=False) + "\n")
+            saved += 1
     out.close()
-    print(f"[done] documents traités : {total_docs}")
-    print(f"[done] chunks écrits     : {total_chunks} -> {CHUNKS_FILE}")
+    print(f"[done] chunks écrits: {saved} -> {CHUNKS_FILE}")
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

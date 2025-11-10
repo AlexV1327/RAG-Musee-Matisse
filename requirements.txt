@@ -1,9 +1,21 @@
-httpx
-certifi
-watchdog
-transformers>=4.45,<5
-tokenizers>=0.22,<0.24
-sentence-transformers
-faiss-cpu
-streamlit
-numpy
+# Core
+python-dotenv==1.0.1
+requests==2.32.3
+httpx==0.27.2
+
+# Scraping & parsing
+trafilatura==1.8.1
+lxml>=4.9.0
+
+# Embeddings / NLP
+sentence-transformers==3.0.1
+torch==2.2.2
+transformers==4.44.2
+
+# Vector index
+faiss-cpu==1.8.0.post1
+
+# Utils
+numpy==1.24.4
+streamlit==1.39.0
+tqdm==4.66.4
