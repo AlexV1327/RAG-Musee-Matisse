@@ -1,0 +1,27 @@
+# Environnements & OS
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+
+# Données locales / index
+matisse_data/
+*.faiss
+*.index
+*.db
+*.sqlite
+*.log
+
+# Fichiers générés par le pipeline
+matisse_data/pages.jsonl
+matisse_data/chunks.jsonl
+matisse_data/chunk_meta.jsonl
+matisse_data/faiss.index
+
+# Secrets / config locaux
+.env
+.streamlit/secrets.toml
